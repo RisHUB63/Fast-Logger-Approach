@@ -71,10 +71,10 @@ Functional requrement statisfaction
 	APPLICATIONS SERVER MACHINE
 
 
-PORT  8000  1234			8001
+PORT  	8000    1234		8001
 	  APP   IN-MEMORY <---->SCRIPT (hit after x interval)
 	  |		   ^			fetch <1000 chunks of data and push it in aws
-	  |-->LOGS | 			also delet the chunk once it successfully pushed in cloud
+	  |-->LOGS ------->| 			also delet the chunk once it successfully pushed in cloud
 
 
 same machine running the multiple process at single time
@@ -112,10 +112,10 @@ Non Functional requrement statisfaction
 	APPLICATIONS SERVER MACHINE
 
 
-PORT  8000  1234							8001
+PORT  	  8000  1234				8001
 	  APP   IN-MEMORY(Dragonfly DB) <---->	SCRIPT (hit after x interval)
-	  |		   ^							fetch <1000 chunks of data and push it in aws
-	  |-->LOGS | 							also delet the chunk once it successfully pushed in cloud (AWS Cloudwatch)
+	  |		   ^			fetch <1000 chunks of data and push it in aws
+	  |-->LOGS ------->| 			also delet the chunk once it successfully pushed in cloud (AWS Cloudwatch)
 
 
 	Availablity: For the all the application program that are process the logs
@@ -173,10 +173,10 @@ PORT  8000  1234							8001
 	APPLICATIONS SERVER MACHINE
 
 
-PORT  8000  1234							8001
+PORT  	  8000  1234				8001
 	  APP   IN-MEMORY(Dragonfly DB) <---->	SCRIPT (hit after 2 mins interval)
-	  |		   ^							fetch <1000 chunks of data and push it in aws
-	  |-->LOGS | 							also delete the chunk once it successfully pushed in cloud(AWS cloudwatch)
+	  |		   ^			fetch <1000 chunks of data and push it in aws
+	  |-->LOGS ------->| 			also delete the chunk once it successfully pushed in cloud(AWS cloudwatch)
 
 
 
