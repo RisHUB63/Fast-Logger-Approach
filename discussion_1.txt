@@ -1,0 +1,306 @@
+Creating a logging functionality that will be faster than traditional method syncronus method (Catch we can't use Kafka here)
+
+Functional requirement:
+	Faster log processing.
+	Able to logs on cloud.
+	Logs should be in series.
+	Process should be async so that it will not consume much time.
+
+Non-Functional requirement
+	Security: maintain the logs even after the system crashes
+	Availablity: For the all the application program that are process the logs
+	Scalable: scalable enough to handle the large amount of logs at a time
+	Fault tolerance
+
+
+Average log size and calculations
+	assuming one logs data size is 900 bytes
+	ideal logs structure:
+	timestamp, service, data, type, request_id, meta_data
+
+	let say application has 1000 functions and each function carries 4 loggers
+	that is equivalent to 4000 logs
+
+	and if all the functions runs at a same time (ideal scenario)
+	it will be 4000 logs x 900 bytes = 36,00,000 bytes = 3.6mb of data
+	that means storage is not big concern over here
+
+	that means if we use 1GB of in-memory storage it can store upto: 1,137,777 logs at time i.e 1mb (a ideal storage can store upto 1000 logs at a time).
+
+	we are using the AWS cloudwatch for the logging purpose.
+
+
+Functional requrement statisfaction
+
+	- Faster log processing
+		Use the in-memory data storage where we can store data, and storing data in-memory is much faster than writting in the file and Storage
+		3 options are available
+			RAM using the Queue data structure
+			Redis
+			Dragonfly
+
+
+		each of them having there own pros and cons will choose them at a of non-funtional statisfaction to statisfy the needs
+
+
+	- Able to push logs on cloud
+
+		After the data has been pushed in memory we will trigger a script that pick some chunk of data and process it.
+		Chunk data will be pushed on the cloud service
+
+		generally cloud can handle 1mb of chunk at a time i.e. 1000 logs chunk at a time.
+		that script will run periodically and push the 1000 logs at a time.
+
+
+
+	- Logs should be in series
+		Since we are using the in-memory as a Queue that means First Comes First Serves
+		So this order will be maintain throughout and during batch processing this series is also maintained.
+		that will eventually maintain the logs series (i.e. according to the timestamp)
+
+
+	- Logs process should be async
+		Writting on the in-memory is faster that usual so it won't matter if we do it synchronously.
+
+
+
+
+==============HIGH LEVEL ARCHITECTURE TILL NOW===================
+
+
+	APPLICATIONS SERVER MACHINE
+
+
+PORT  8000  1234			8001
+	  APP   IN-MEMORY <---->SCRIPT (hit after x interval)
+	  |		   ^			fetch <1000 chunks of data and push it in aws
+	  |-->LOGS | 			also delet the chunk once it successfully pushed in cloud
+
+
+same machine running the multiple process at single time
+
+
+
+Non Functional requrement statisfaction
+	Security
+		In order to maintain the logs after the application crash we will place the data in-memory alternative
+			Redis
+			Dragonfly DB (can handle more data than Redis)
+
+
+			In this scenarion where we can unstable scalabity we will use the Dragonfly DB
+			Because it has high throughput that Redis and better memory managemenet, and also mutli threaded.
+
+			That means we are using the Dragonfly DB as our in-memory storage space.
+			Now that means even if application crash we still have security and it wont matter if restart the application.
+
+			But if machine gets restart all the data will be erased so we have to ensure that before restarting the machine we have to 
+			upload all data from dragonfly db to cloud
+
+			and in most of the case application restarted not machine, so we can use the Dragonfly DB as the in-memory storage.
+
+
+			Talking about the machine restart since our process it fast enough.
+			we will manually trigger the script before restarting the machine so that all the logs will pushed to cloud
+			or we can add it to the pipeline before restarting the machine.
+
+
+
+==============HIGH LEVEL ARCHITECTURE TILL NOW===================
+
+
+	APPLICATIONS SERVER MACHINE
+
+
+PORT  8000  1234							8001
+	  APP   IN-MEMORY(Dragonfly DB) <---->	SCRIPT (hit after x interval)
+	  |		   ^							fetch <1000 chunks of data and push it in aws
+	  |-->LOGS | 							also delet the chunk once it successfully pushed in cloud (AWS Cloudwatch)
+
+
+	Availablity: For the all the application program that are process the logs
+		Since we run the script and Dragonfly DB on different port in a same machine it wont impact on the logs.
+		Also the in-memory are always up till machine dont crashes, we have complete availablity.
+
+
+	Scalable: scalable enough to handle the large amount of logs at a time
+		We used the Dragonfly DB for better storage optimisation 
+		also we can use 1GB of storage that can handle the 1million of logs at a time, Dragonfly can handle the 1 millon request/sec
+		that means are secure enough for high traffic dealing.
+
+		Also the periodic logs cleaning will remove the logs thats being processed.
+
+	Fault tolerance
+		We already handled the fault by running the dragon fly DB in different port,
+		but to make it more fault tolerance we have to set the interval time such that it will pick the latest data real quick so we have neglagible data loss.
+
+		In order to choose the right time for the interval: we have to keep in mind that we can run it too frequent because it will consume some
+		I/O operation of machine and we have to keep it minimal.
+
+
+		For cross origin it takes around 300ms to push 1000 logs batch to the cloud.
+		So over process will took, 1/2 sec and general an api response is come under the 1 sec or 1000 ms each api have atleast 9-10 function calling.
+		10 function calling equivalent to 10 x 4 logs per function: 40 logs
+
+		that means 40 logs under 1000ms
+
+		40 x 250 = 1000logs
+		1000 ms x 250 = 250 sec ~= 4mins (ideal)
+
+		usually api runs under the 500ms
+
+		that means the time will ~= 2mins
+		means time interval will be after every 2 mins
+		300ms to push the data to cloud and then deleting the chunk from the dragonfly DB will be .1 ms, so the script whole process will be less than 300ms that include cross origin cloud logs too.
+
+
+		Since we are using the in-memory the logs will stay for some period of time and then vanish so in order to monitor those logs between the application is hard, we have to wait for another 2 min for batch process.
+
+
+		In case for logs pushing fails because we are pushing the batch with-in the origin and outside too.
+
+			we will use 3 re-tries and if it still won't work, we will make the batch of 4 and then push it till 3 retries
+			so in worst case 15 retires that will took, 15 x 300 ms = 4500ms ~= 5 sec, once a batch fails we will fire the 
+			expection handling mails for the batches for further investigation.
+
+
+
+
+
+==============HIGH LEVEL ARCHITECTURE TILL NOW===================
+
+
+	APPLICATIONS SERVER MACHINE
+
+
+PORT  8000  1234							8001
+	  APP   IN-MEMORY(Dragonfly DB) <---->	SCRIPT (hit after 2 mins interval)
+	  |		   ^							fetch <1000 chunks of data and push it in aws
+	  |-->LOGS | 							also delete the chunk once it successfully pushed in cloud(AWS cloudwatch)
+
+
+
+
+Code level
+	logging library
+		import redis
+		import json
+		from datetime import datetime
+
+		class DragonLogger:
+		    def __init__(self, redis_host='localhost', redis_port=6379, redis_key='logs:buffer'):
+		        self.redis = redis.Redis(host=redis_host, port=redis_port, decode_responses=True)
+		        self.redis_key = redis_key
+
+		    def log(self, service, data, log_type, request_id, metadata=None):
+		        log_entry = {
+		            "timestamp": datetime.utcnow().isoformat(),
+		            "service": service,
+		            "data": data,
+		            "type": log_type,
+		            "request_id": request_id,
+		            "metadata": metadata or {}
+		        }
+		        # Push to the end of the list (FIFO queue)
+		        self.redis.rpush(self.redis_key, json.dumps(log_entry))
+
+
+	implementation use
+
+	# In your application
+	from dragon_logger import DragonLogger
+
+	logger = DragonLogger()
+
+	logger.log(
+	    service="user-service",
+	    data="User signed up",
+	    log_type="INFO",
+	    request_id="abc-123",
+	    metadata={"user_id": 42}
+	)
+
+
+Script that will pull, push and delete the data from it
+
+
+# log_pusher.py
+import redis
+import boto3
+import json
+import time
+
+REDIS_HOST = 'localhost'
+REDIS_PORT = 6379
+REDIS_KEY = 'logs:buffer'
+BATCH_SIZE = 1000
+RETRY_LIMIT = 3
+CLOUDWATCH_GROUP = 'my-app-log-group'
+CLOUDWATCH_STREAM = 'app-log-stream'
+
+client = boto3.client('logs', region_name='ap-south-1')  # Use your region
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+def get_sequence_token():
+    try:
+        response = client.describe_log_streams(
+            logGroupName=CLOUDWATCH_GROUP,
+            logStreamNamePrefix=CLOUDWATCH_STREAM
+        )
+        streams = response['logStreams']
+        if streams and 'uploadSequenceToken' in streams[0]:
+            return streams[0]['uploadSequenceToken']
+    except Exception as e:
+        print("Error getting sequence token:", e)
+    return None
+
+def send_to_cloudwatch(log_batch):
+    events = [{
+        'timestamp': int(time.time() * 1000),
+        'message': json.dumps(log)
+    } for log in log_batch]
+
+    token = get_sequence_token()
+    kwargs = {
+        'logGroupName': CLOUDWATCH_GROUP,
+        'logStreamName': CLOUDWATCH_STREAM,
+        'logEvents': events
+    }
+
+    if token:
+        kwargs['sequenceToken'] = token
+
+    return client.put_log_events(**kwargs)
+
+def main():
+    retries = 0
+    while retries < RETRY_LIMIT:
+        logs = []
+        for _ in range(BATCH_SIZE):
+            raw_log = redis_client.lpop(REDIS_KEY)
+            if raw_log:
+                logs.append(json.loads(raw_log))
+            else:
+                break
+
+        if not logs:
+            print("No logs to process.")
+            break
+
+        try:
+            response = send_to_cloudwatch(logs)
+            print(f"Pushed {len(logs)} logs to CloudWatch")
+            break  # Success
+        except Exception as e:
+            print(f"Failed to push logs. Retry {retries + 1}/{RETRY_LIMIT}: {e}")
+            retries += 1
+            time.sleep(1)
+
+if __name__ == "__main__":
+    main()
+
+
+# This script can be handle via cron
+*/2 * * * * /usr/bin/python3 /path/to/log_pusher.py >> /var/log/log_pusher.log 2>&1
+
+
